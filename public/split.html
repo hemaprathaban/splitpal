@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SplitPal - who's paid</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header><div class="wrap"><div><div class="logo"><a href="/" style="color:#fff;text-decoration:none">SplitPal</a></div><p class="tag" id="sub">Loading...</p></div></div></header>
+  <main class="wrap">
+    <section class="card">
+      <div class="step">Collected so far</div>
+      <div class="big" id="collected">-</div>
+      <div class="progress"><div id="bar" style="width:0%"></div></div>
+      <div class="muted small" id="progressText"></div>
+    </section>
+    <section class="card">
+      <h2>Send each friend their link</h2>
+      <p class="muted small">Each link opens a PayPal checkout for exactly that person's share. This page updates automatically as people pay.</p>
+      <div id="shares"></div>
+    </section>
+    <div class="actions"><a class="btn" href="/">Split another bill</a></div>
+  </main>
+  <footer>Payments run in the PayPal sandbox, no real money moves.</footer>
+<script>
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const id = location.pathname.split("/").pop();
+async function load() {
+  const res = await fetch(`/api/splits/${id}`);
+  const s = await res.json();
+  if (!res.ok) { document.getElementById("sub").textContent = s.error; return; }
+  document.getElementById("sub").textContent = `${s.merchant} · ${s.total} ${s.currency} · paid by ${s.payer}`;
+  const owed = s.shares.filter((x) => x.status === "pending" || x.status === "paid");
+  const due = owed.reduce((a, x) => a + Number(x.total), 0);
+  const got = owed.filter((x) => x.status === "paid").reduce((a, x) => a + Number(x.total), 0);
+  document.getElementById("collected").textContent = `${got.toFixed(2)} / ${due.toFixed(2)} ${s.currency}`;
+  document.getElementById("bar").style.width = due ? `${(got / due) * 100}%` : "100%";
+  const left = owed.filter((x) => x.status !== "paid").length;
+  document.getElementById("progressText").textContent = left ? `Waiting on ${left} ${left === 1 ? "person" : "people"}` : "Everyone has paid. All settled!";
+  document.getElementById("shares").innerHTML = s.shares.map((x) => {
+    const link = x.payToken ? `${location.origin}/pay/${s.id}/${x.payToken}` : "";
+    const badge = x.status === "paid" ? `<span class="badge paid">Paid${x.simulated ? " (demo)" : ""}</span>`
+      : x.status === "payer" ? `<span class="badge payer">Paid the bill</span>`
+      : x.status === "nothing_owed" ? `<span class="badge payer">Owes nothing</span>`
+      : `<span class="badge pending">Waiting</span>`;
+    return `<div class="share">
+      <div><strong>${esc(x.name)}</strong> ${badge}<div class="muted small">${x.items.map((i) => esc(i.name) + (i.sharedWith > 1 ? ` (1/${i.sharedWith})` : "")).join(", ")}</div></div>
+      <div class="amt">${x.total} ${s.currency}</div>
+      ${x.status === "pending" ? `<div class="copy"><input type="text" readonly value="${esc(link)}" /><button class="secondary" data-copy="${esc(link)}">Copy</button><a class="btn" href="${esc(link)}" target="_blank">Open</a></div>` : ""}
+    </div>`;
+  }).join("");
+  document.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; } catch { b.previousElementSibling.select(); }
+  });
+}
+load();
+setInterval(() => { if (!document.querySelector("input:focus")) load(); }, 4000);
+</script>
+</body>
+</html>

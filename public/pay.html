@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SplitPal - pay your share</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header><div class="wrap"><div><div class="logo">SplitPal</div><p class="tag" id="sub">Loading...</p></div></div></header>
+  <main class="wrap">
+    <section class="card" style="text-align:center">
+      <div class="step" id="who"></div>
+      <div class="big" id="amount">-</div>
+      <div class="muted" id="forWhat"></div>
+      <table style="margin:16px 0; text-align:left"><tbody id="items"></tbody></table>
+      <div id="paid" class="hidden"><span class="badge paid" style="font-size:16px;padding:6px 16px">Paid, thank you!</span></div>
+      <div id="paypal-buttons" style="max-width:420px;margin:0 auto"></div>
+      <div id="demo" class="hidden">
+        <button id="simBtn">Pay (demo, no PayPal keys set)</button>
+      </div>
+      <div id="err" class="error"></div>
+    </section>
+  </main>
+  <footer>Payments run in the PayPal sandbox, no real money moves.</footer>
+<script>
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const [, , splitId, token] = location.pathname.split("/");
+const api = `/api/splits/${splitId}/pay/${token}`;
+const $ = (id) => document.getElementById(id);
+
+function showPaid() {
+  $("paid").classList.remove("hidden");
+  $("paypal-buttons").classList.add("hidden");
+  $("demo").classList.add("hidden");
+}
+
+async function main() {
+  const [cfg, info] = await Promise.all([fetch("/api/config").then((r) => r.json()), fetch(api).then((r) => r.json())]);
+  if (info.error) { $("sub").textContent = info.error; return; }
+  const { split, share } = info;
+  $("sub").textContent = `${split.payer} covered ${split.merchant}`;
+  $("who").textContent = `Hi ${share.name}, your share`;
+  $("amount").textContent = `${share.total} ${split.currency}`;
+  $("forWhat").textContent = `owed to ${split.payer}`;
+  $("items").innerHTML = share.items.map((i) => `<tr><td>${esc(i.name)}${i.sharedWith > 1 ? ` <span class="muted small">(split ${i.sharedWith} ways)</span>` : ""}</td><td class="num">${i.amount}</td></tr>`).join("")
+    + `<tr><td class="muted">Tax, tip &amp; fees (your part)</td><td class="num">${share.extras}</td></tr>`;
+  if (share.status === "paid") return showPaid();
+
+  if (!cfg.paypalEnabled) {
+    $("demo").classList.remove("hidden");
+    $("simBtn").onclick = async () => {
+      const r = await fetch(`${api}/simulate`, { method: "POST" });
+      r.ok ? showPaid() : ($("err").textContent = (await r.json()).error);
+    };
+    return;
+  }
+
+  const sdk = document.createElement("script");
+  sdk.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.paypalClientId)}&currency=${encodeURIComponent(split.currency)}&intent=capture`;
+  sdk.onload = () => {
+    paypal.Buttons({
+      style: { layout: "vertical", shape: "pill", label: "pay" },
+      createOrder: async () => {
+        const r = await fetch(`${api}/order`, { method: "POST" });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        return d.id;
+      },
+      onApprove: async (data) => {
+        const r = await fetch(`${api}/capture`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: data.orderID }),
+        });
+        const d = await r.json();
+        r.ok ? showPaid() : ($("err").textContent = d.error);
+      },
+      onError: (err) => { $("err").textContent = err?.message || "PayPal error, please try again."; },
+    }).render("#paypal-buttons");
+  };
+  sdk.onerror = () => ($("err").textContent = "Could not load PayPal.");
+  document.head.appendChild(sdk);
+}
+main();
+</script>
+</body>
+</html>
