@@ -40,7 +40,7 @@ app.get("/api/config", (req, res) => {
     aiEnabled: aiEnabled(),
     model: MODEL,
     paypalEnabled: paypal.paypalEnabled(),
-    paypalClientId: paypal.paypalEnabled() ? process.env.PAYPAL_CLIENT_ID : null,
+    paypalClientId: paypal.paypalEnabled() ? paypal.clientId() : null,
   });
 });
 
